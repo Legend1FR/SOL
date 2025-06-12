@@ -1,61 +1,16 @@
-const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
-const http = require('http'); // 👈 Add this line
-
-// Replace with your Telegram bot token
-const token = '7564788306:AAHO8fXpp2TSyTg0SMhrRGxIupkLSEwLsvQ'; // YOUR_TELEGRAM_BOT_TOKEN Updated
-const bot = new TelegramBot(token, { polling: true });
+const http = require('http');
+const url = require('url'); // For parsing URL and query parameters
 
 // CoinMarketCap API Configuration
-const COINMARKETCAP_API_KEY = 'd2442a28-fe25-4589-8b9a-aa864395e595'; // 👈 REPLACE WITH YOUR ACTUAL COINMARKETCAP API KEY
-// Example endpoint - You'll likely need to adjust this and potentially use multiple endpoints
-// This endpoint lists cryptocurrencies. You'll need to filter for Solana platform tokens
-// and then potentially fetch more details for each.
+const COINMARKETCAP_API_KEY = 'd2442a28-fe25-4589-8b9a-aa864395e595'; // 👈 استبدل هذا بمفتاح API الخاص بك من CoinMarketCap
 const COINMARKETCAP_LISTINGS_API = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest';
-// You might also need an endpoint to get metadata or map tokens to Solana platform
-// const COINMARKETCAP_MAP_API = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/map';
 
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    const welcomeMessage = `🚀 *Solana Gem Finder Bot (CMC Edition)* 🚀
-
-I'll help you find potential Solana tokens using CoinMarketCap data with these criteria:
-
-• Liquidity: $10K+ (Note: CMC might not provide DEX liquidity directly)
-• Market Cap: $350K+
-• Token Age: 24-48h max (Note: CMC provides 'date_added')
-• 24h Buys/Sells: (Note: CMC might not provide this granular DEX data)
-• Hourly Txns: (Note: CMC might not provide this granular DEX data)
-• FDV: Under $900K
-
-Use /analyze to find gems or /help for more info.
-*Disclaimer*: Data from CoinMarketCap might differ from DEX-specific aggregators. Some criteria might be harder to match precisely.`;
-
-    bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
-});
-
-bot.onText(/\/help/, (msg) => {
-    const chatId = msg.chat.id;
-    const helpMessage = `🔍 *How to Use This Bot (CMC Edition)* 🔍
-
-1. Use /analyze to scan for Solana tokens based on CoinMarketCap data.
-2. I'll show you tokens matching available criteria.
-3. *Important*: CoinMarketCap data is more general. For DEX-specific details (like exact liquidity on Raydium, recent buy/sell counts), you'll still need to check tools like DexScreener, Birdeye, or Rugcheck.
-
-*Remember*: Always do your own research and manage risk!`;
-
-    bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
-});
-
-bot.onText(/\/analyze/, async (msg) => {
-    const chatId = msg.chat.id;
-
+// Refactor the analysis logic into a standalone function
+async function analyzeTokens() {
     try {
-        await bot.sendMessage(chatId, '🔎 Scanning for potential Solana gems using CoinMarketCap... This may take a moment.');
+        console.log('🔎 Scanning for potential Solana gems using CoinMarketCap...');
 
-        // Get Solana tokens from CoinMarketCap
-        // You might need to fetch a large list and then filter by platform,
-        // or use a specific endpoint if CMC offers one for platform tokens.
         const response = await axios.get(COINMARKETCAP_LISTINGS_API, {
             headers: {
                 'X-CMC_PRO_API_KEY': COINMARKETCAP_API_KEY
@@ -64,39 +19,25 @@ bot.onText(/\/analyze/, async (msg) => {
                 // sort: 'date_added', // Sort by date added to find newer tokens
                 // limit: 200, // Fetch a decent number to filter
                 // aux: 'platform,date_added,circulating_supply,total_supply,max_supply,tags', // Request additional data
-                // You might need to filter for 'solana-platform' tokens client-side if not directly supported
-                // Or use a different endpoint if available for specific platforms
-                // For example, if you get all tokens, you'll need to iterate and check token.platform.slug === 'solana'
             }
         });
         
         if (!response.data || !response.data.data) {
             console.error('Invalid response structure from CoinMarketCap:', response.data);
-            await bot.sendMessage(chatId, '⚠️ Error fetching token data: Invalid response from CoinMarketCap. Please try again later.');
-            return;
+            return { error: 'Invalid response from CoinMarketCap.' };
         }
         
-        // CMC returns an array of tokens in response.data.data
         const allTokens = response.data.data;
 
-        // Filter tokens based on criteria
-        // IMPORTANT: Field names and data availability will differ significantly from DexScreener
         const filteredTokens = allTokens.filter(token => {
-            // 1. Check if it's a Solana platform token (example)
-            // This depends on how CMC structures platform data.
-            // You might need to check token.platform.name === 'Solana' or token.platform.token_address
-            const isSolanaToken = token.platform && token.platform.slug === 'solana'; // Adjust based on actual CMC response
+            const isSolanaToken = token.platform && token.platform.slug === 'solana';
             if (!isSolanaToken) return false;
 
             const quoteUSD = token.quote?.USD;
-            if (!quoteUSD) return false; // Essential price data missing
+            if (!quoteUSD) return false;
 
-            // Liquidity: CMC typically shows overall market liquidity, not specific DEX pool liquidity.
-            // This criterion might be hard to match directly. You might look at 24h volume as a proxy.
             const volume24h = quoteUSD.volume_24h || 0;
-            // For "Liquidity >= 10000", we might use volume as a loose proxy or acknowledge this is a limitation.
-            // Let's assume for now we're checking volume instead of DEX liquidity.
-            const hasSufficientActivity = volume24h >= 10000; // Adjust this threshold
+            const hasSufficientActivity = volume24h >= 10000;
 
             const marketCap = quoteUSD.market_cap || 0;
             const fdv = quoteUSD.fully_diluted_market_cap || 0;
@@ -105,159 +46,217 @@ bot.onText(/\/analyze/, async (msg) => {
             const now = new Date();
             const ageHours = (now.getTime() - dateAdded.getTime()) / (1000 * 60 * 60);
 
-            // 24h Buys/Sells & Hourly Txns: CMC generally does NOT provide this granular DEX transaction data.
-            // You will likely have to remove these criteria or find proxies.
-            // For this example, we'll comment them out.
-            // const txns24hBuys = ...; // Not available
-            // const txns24hSells = ...; // Not available
-            // const hourlyTxns = ...; // Not available
-
-            return hasSufficientActivity && // Using volume as a proxy for liquidity/activity
+            return hasSufficientActivity &&
                 marketCap >= 350000 &&
                 ageHours >= 24 && ageHours <= 48 &&
-                // txns24h.buys >= 100 && // Not available from CMC
-                // txns24h.sells >= 70 && // Not available from CMC
-                // hourlyTxns >= 100 && // Not available from CMC
                 fdv <= 900000 &&
-                token.platform.token_address; // Ensure it has a token address on Solana
+                token.platform.token_address;
         });
 
         if (filteredTokens.length === 0) {
-            await bot.sendMessage(chatId, 'No tokens matching all available criteria found using CoinMarketCap. Some criteria (like specific DEX liquidity, buy/sell counts) are not available. Try again later or adjust criteria.');
-            return;
+            return { message: 'No tokens matching all available criteria found using CoinMarketCap.' };
         }
 
-        // Sort by market cap or date added (adjust as needed)
         filteredTokens.sort((a, b) => (b.quote.USD.market_cap || 0) - (a.quote.USD.market_cap || 0));
+        const topTokens = filteredTokens.slice(0, 5); // Get top 5 or fewer
 
-        const topTokens = filteredTokens.slice(0, 5);
-
-        await bot.sendMessage(chatId, `Found *${filteredTokens.length}* potential Solana tokens via CoinMarketCap. Displaying top *${topTokens.length}*:
-(Note: Some criteria like DEX liquidity and buy/sell counts are not directly available from CMC)`, { parse_mode: 'Markdown' });
-
-        for (const cmcToken of topTokens) {
-            const message = formatTokenMessageCMC(cmcToken); // Use a new formatting function
-            await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-
-            const solanaTokenAddress = cmcToken.platform.token_address;
-
-            const options = {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            { text: '🔍 Rugcheck', url: `http://rugcheck.xyz/tokens/${solanaTokenAddress}` },
-                            { text: '📊 CoinMarketCap', url: `https://coinmarketcap.com/currencies/${cmcToken.slug}/` },
-                            { text: '📈 DexScreener (if listed)', url: `https://dexscreener.com/solana/${solanaTokenAddress}` }
-                        ],
-                        [
-                            { text: '💬 Check TG (Manual)', callback_data: `checktg_manual_${cmcToken.symbol}` }
-                            // { text: '🔄 Next Batch', callback_data: '/analyze_next_batch_cmc' }
-                        ]
-                    ]
-                }
-            };
-            await bot.sendMessage(chatId, 'Quick checks & actions:', options);
-        }
+        // Format tokens for web display
+        return topTokens.map(token => formatTokenDataForWeb(token));
 
     } catch (error) {
-        console.error('Error in /analyze command with CoinMarketCap:', error.response ? error.response.data : error.message);
-        await bot.sendMessage(chatId, '⚠️ Error fetching or processing token data from CoinMarketCap. Please try again later.');
-    }
-});
-
-// Handler for "Check TG" button (simplified for CMC)
-bot.on('callback_query', async (callbackQuery) => {
-    const msg = callbackQuery.message;
-    const chatId = msg.chat.id;
-    const data = callbackQuery.data;
-
-    if (data.startsWith('checktg_manual_')) {
-        const symbol = data.split('_')[2];
-        await bot.answerCallbackQuery(callbackQuery.id, { text: `Search for ${symbol} community manually.` });
-        await bot.sendMessage(chatId, `For ${symbol}, please search for their Telegram group or community links on their CoinMarketCap page or official website.`);
-    } else if (data.startsWith('checktg_')) { // Keep old DexScreener logic if needed elsewhere
-        const symbol = data.split('_')[1];
-        await handleCheckTg(chatId, symbol);
-    }
-    // ... (handle other callbacks like analyze_next_batch if you implement them)
-    else {
-        await bot.answerCallbackQuery(callbackQuery.id);
-    }
-});
-
-// Original handleCheckTg for DexScreener (can be kept if you plan to switch between APIs)
-async function handleCheckTg(chatId, symbol) {
-    // ... (implementation from your original code)
-    try {
-        await bot.sendMessage(chatId, `Searching for Telegram group for ${symbol} (via placeholder)...`);
-        const telegramLink = await findTelegramGroup(symbol);
-        if (telegramLink) {
-            await bot.sendMessage(chatId, `Join the ${symbol} Telegram group: ${telegramLink}`);
-        } else {
-            await bot.sendMessage(chatId, `Couldn't find a Telegram group for ${symbol} via automated search.
-Check their website or DexScreener/CoinMarketCap page for community links.`);
-        }
-    } catch (error) {
-        console.error(`Error searching for Telegram group for ${symbol}:`, error);
-        await bot.sendMessage(chatId, 'Error searching for Telegram group.');
+        console.error('Error in analyzeTokens function:', error.response ? error.response.data : error.message);
+        return { error: 'Error fetching or processing token data from CoinMarketCap.' };
     }
 }
 
-
-// New formatting function for CoinMarketCap data
-function formatTokenMessageCMC(cmcToken) {
+// Modify formatting function to return structured data for the web
+function formatTokenDataForWeb(cmcToken) {
     const quoteUSD = cmcToken.quote.USD;
     const dateAdded = new Date(cmcToken.date_added);
     const now = new Date();
     const ageHours = ((now.getTime() - dateAdded.getTime()) / (1000 * 60 * 60)).toFixed(1);
     const solanaTokenAddress = cmcToken.platform?.token_address || 'N/A';
 
-    return `✨ *${cmcToken.name} (${cmcToken.symbol})* ✨
-Token Address (Solana): \`${solanaTokenAddress}\`
-
-📊 *Price*: $${quoteUSD.price ? parseFloat(quoteUSD.price).toFixed(6) : 'N/A'}
-💰 *Market Cap*: $${(quoteUSD.market_cap || 0).toLocaleString()}
-🏦 *Fully Diluted Market Cap (FDV)*: $${(quoteUSD.fully_diluted_market_cap || 0).toLocaleString()}
-🔄 *24h Volume*: $${(quoteUSD.volume_24h || 0).toLocaleString()}
-⏳ *Date Added to CMC*: ${dateAdded.toLocaleDateString()} (${ageHours} hours ago)
-💎 *Circulating Supply*: ${(cmcToken.circulating_supply || 0).toLocaleString()} ${cmcToken.symbol}
-📦 *Total Supply*: ${(cmcToken.total_supply || 0).toLocaleString()} ${cmcToken.symbol}
-${cmcToken.max_supply ? `🔒 *Max Supply*: ${cmcToken.max_supply.toLocaleString()} ${cmcToken.symbol}` : ''}
-
-[CoinMarketCap Page](https://coinmarketcap.com/currencies/${cmcToken.slug}/)
-[Rugcheck (Solana Address)](http://rugcheck.xyz/tokens/${solanaTokenAddress})`;
+    return {
+        name: cmcToken.name,
+        symbol: cmcToken.symbol,
+        tokenAddress: solanaTokenAddress,
+        price: quoteUSD.price ? parseFloat(quoteUSD.price).toFixed(6) : 'N/A',
+        marketCap: (quoteUSD.market_cap || 0).toLocaleString(),
+        fdv: (quoteUSD.fully_diluted_market_cap || 0).toLocaleString(),
+        volume24h: (quoteUSD.volume_24h || 0).toLocaleString(),
+        dateAdded: dateAdded.toLocaleDateString(),
+        ageHours: ageHours,
+        circulatingSupply: (cmcToken.circulating_supply || 0).toLocaleString(),
+        totalSupply: (cmcToken.total_supply || 0).toLocaleString(),
+        maxSupply: cmcToken.max_supply ? cmcToken.max_supply.toLocaleString() : null,
+        cmcLink: `https://coinmarketcap.com/currencies/${cmcToken.slug}/`,
+        rugcheckLink: `http://rugcheck.xyz/tokens/${solanaTokenAddress}`,
+        dexscreenerLink: `https://dexscreener.com/solana/${solanaTokenAddress}` // Added DexScreener link
+    };
 }
 
-// Placeholder findTelegramGroup function (remains the same)
-async function findTelegramGroup(symbol) {
-    console.log(`Placeholder: findTelegramGroup called for ${symbol}`);
-    return null;
-}
+// --- Frontend HTML ---
+const htmlContent = `
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Gem Finder</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f0f2f5; color: #1c1e21; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
+        .container { background-color: #ffffff; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 800px; }
+        h1 { color: #1877f2; text-align: center; margin-bottom: 20px; font-size: 28px; }
+        p.description { text-align: center; color: #606770; margin-bottom: 25px; font-size: 16px; }
+        button {
+            background-color: #1877f2; color: white; padding: 12px 20px; border: none;
+            border-radius: 6px; cursor: pointer; font-size: 17px; display: block; margin: 20px auto;
+            transition: background-color 0.3s ease; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button:hover { background-color: #166fe5; }
+        button:disabled { background-color: #bcc0c4; cursor: not-allowed; }
+        #results { margin-top: 25px; }
+        .token { border: 1px solid #dddfe2; padding: 20px; margin-bottom: 20px; border-radius: 8px; background-color: #f7f8fa; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .token h2 { margin-top: 0; color: #050505; font-size: 22px; margin-bottom: 10px; }
+        .token p { margin: 8px 0; color: #333; font-size: 15px; line-height: 1.6; }
+        .token p strong { color: #1c1e21; }
+        .token-links a { color: #1877f2; text-decoration: none; margin-right: 15px; font-weight: 500; }
+        .token-links a:hover { text-decoration: underline; }
+        .loading, .error, .message { text-align: center; font-size: 18px; color: #606770; padding: 15px; border-radius: 6px; margin-top: 20px; }
+        .loading { background-color: #e7f3ff; border: 1px solid #cce0ff; }
+        .error { background-color: #ffebe8; border: 1px solid #ffc9c4; color: #c92a2a; }
+        .message { background-color: #e6f7ff; border: 1px solid #b3e0ff; }
+        .token-address { font-family: 'Courier New', Courier, monospace; background-color: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Solana Gem Finder (CMC Edition)</h1>
+        <p class="description">
+            اضغط على الزر أدناه للبحث عن العملات الواعدة على شبكة سولانا بناءً على معايير محددة باستخدام بيانات CoinMarketCap.
+        </p>
+        <button id="analyzeButton">🚀 ابدأ التحليل</button>
+        <div id="loading" class="loading" style="display:none;">⏳ جارٍ البحث عن العملات... الرجاء الانتظار...</div>
+        <div id="error" class="error" style="display:none;"></div>
+        <div id="message" class="message" style="display:none;"></div>
+        <div id="results"></div>
+    </div>
 
-console.log('Bot is running...');
+    <script>
+        document.getElementById('analyzeButton').addEventListener('click', async () => {
+            const resultsDiv = document.getElementById('results');
+            const loadingDiv = document.getElementById('loading');
+            const errorDiv = document.getElementById('error');
+            const messageDiv = document.getElementById('message');
+            const analyzeButton = document.getElementById('analyzeButton');
+            
+            resultsDiv.innerHTML = ''; // Clear previous results
+            errorDiv.style.display = 'none'; // Clear previous errors
+            messageDiv.style.display = 'none'; // Clear previous messages
+            loadingDiv.style.display = 'block'; // Show loading indicator
+            analyzeButton.disabled = true;
 
-// Graceful shutdown
-process.once('SIGINT', () => {
-    bot.stopPolling({ cancel: true }).then(() => {
-        console.log('Bot polling stopped by SIGINT');
-        if (server) server.close(() => console.log('HTTP server closed'));
-    });
-});
-process.once('SIGTERM', () => {
-    bot.stopPolling({ cancel: true }).then(() => {
-        console.log('Bot polling stopped by SIGTERM');
-        if (server) server.close(() => console.log('HTTP server closed'));
-    });
-});
+            try {
+                const response = await fetch('/api/analyze');
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({error: 'Failed to parse error response'}));
+                    throw new Error(errData.error || \`HTTP error! status: \${response.status}\`);
+                }
+                const data = await response.json();
+                
+                loadingDiv.style.display = 'none';
+                analyzeButton.disabled = false;
 
-// Create a simple HTTP server to satisfy Render's port binding requirement
-const PORT = process.env.PORT || 3000; // Render provides the PORT environment variable
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Telegram Bot is active. Polling for updates.\n');
+                if (data.error) {
+                    errorDiv.textContent = 'حدث خطأ: ' + data.error;
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                if (data.message) { // For messages like "No tokens found"
+                    messageDiv.textContent = data.message;
+                    messageDiv.style.display = 'block';
+                    return;
+                }
+
+                if (data && data.length > 0) {
+                    data.forEach(token => {
+                        const tokenElement = document.createElement('div');
+                        tokenElement.className = 'token';
+                        tokenElement.innerHTML = \\\`
+                            <h2>\${token.name} (\${token.symbol})</h2>
+                            <p><strong>العنوان (Solana):</strong> <span class="token-address">\${token.tokenAddress}</span></p>
+                            <p><strong>السعر:</strong> $\${token.price}</p>
+                            <p><strong>القيمة السوقية:</strong> $\${token.marketCap}</p>
+                            <p><strong>FDV (القيمة المخففة بالكامل):</strong> $\${token.fdv}</p>
+                            <p><strong>حجم التداول (24 ساعة):</strong> $\${token.volume24h}</p>
+                            <p><strong>تاريخ الإضافة لـ CMC:</strong> \${token.dateAdded} (منذ \${token.ageHours} ساعة)</p>
+                            <p><strong>العرض المتداول:</strong> \${token.circulatingSupply} \${token.symbol}</p>
+                            <p><strong>إجمالي العرض:</strong> \${token.totalSupply} \${token.symbol}</p>
+                            \${token.maxSupply ? \\\`<p><strong>أقصى عرض:</strong> \${token.maxSupply} \${token.symbol}</p>\\\` : ''}
+                            <p class="token-links">
+                                <a href="\${token.cmcLink}" target="_blank" rel="noopener noreferrer">CoinMarketCap</a> | 
+                                <a href="\${token.rugcheckLink}" target="_blank" rel="noopener noreferrer">Rugcheck</a> |
+                                <a href="\${token.dexscreenerLink}" target="_blank" rel="noopener noreferrer">DexScreener</a>
+                            </p>
+                        \\\`;
+                        resultsDiv.appendChild(tokenElement);
+                    });
+                } else {
+                    messageDiv.textContent = 'لم يتم العثور على عملات تطابق المعايير المحددة.';
+                    messageDiv.style.display = 'block';
+                }
+            } catch (err) {
+                console.error('Fetch error:', err);
+                loadingDiv.style.display = 'none';
+                analyzeButton.disabled = false;
+                errorDiv.textContent = 'حدث خطأ أثناء جلب البيانات: ' + err.message + '. حاول مرة أخرى.';
+                errorDiv.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
+`;
+
+// Create HTTP server
+const PORT = process.env.PORT || 3000;
+const server = http.createServer(async (req, res) => {
+    const parsedUrl = url.parse(req.url, true);
+
+    if (parsedUrl.pathname === '/' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(htmlContent);
+    } else if (parsedUrl.pathname === '/api/analyze' && req.method === 'GET') {
+        try {
+            const analysisResults = await analyzeTokens();
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(analysisResults));
+        } catch (error) {
+            console.error("Error in /api/analyze endpoint:", error);
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ error: 'Internal server error during analysis.' }));
+        }
+    } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Page Not Found - الصفحة غير موجودة');
+    }
 });
 
 server.listen(PORT, () => {
-    console.log(`HTTP server listening on port ${PORT} for health checks.`);
-    console.log('Telegram Bot polling has been initiated.'); // Confirm bot polling starts after server
+    console.log(`HTTP server listening on port ${PORT}. Open http://localhost:${PORT}`);
 });
+
+// Graceful shutdown
+function shutdown(signal) {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    server.close(() => {
+        console.log('HTTP server closed.');
+        process.exit(0);
+    });
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+console.log('Web server is running...');
