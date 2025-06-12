@@ -4,7 +4,7 @@ const url = require('url'); // For parsing URL and query parameters
 
 // CoinMarketCap API Configuration
 const COINMARKETCAP_API_KEY = 'd2442a28-fe25-4589-8b9a-aa864395e595'; // 👈 استبدل هذا بمفتاح API الخاص بك من CoinMarketCap
-const COINMARKETCAP_LISTINGS_API = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest';
+const COINMARKETCAP_LISTINGS_API = 'https://sandbox-api.coinmarketcap.com/v1/cryptocurrency/listings/latest';
 
 // Refactor the analysis logic into a standalone function
 async function analyzeTokens() {
