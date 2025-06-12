@@ -2,7 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 
 // Replace with your Telegram bot token
-const token = '7645780830:AAFKulhuRtIcQiw99RX3M9k3hcRAr2qBlrs'; // YOUR_TELEGRAM_BOT_TOKEN Updated
+const token = '7564788306:AAHO8fXpp2TSyTg0SMhrRGxIupkLSEwLsvQ'; // YOUR_TELEGRAM_BOT_TOKEN Updated
 const bot = new TelegramBot(token, { polling: true });
 
 // CoinMarketCap API Configuration
