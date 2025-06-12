@@ -1,5 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
+const http = require('http'); // 👈 Add this line
 
 // Replace with your Telegram bot token
 const token = '7564788306:AAHO8fXpp2TSyTg0SMhrRGxIupkLSEwLsvQ'; // YOUR_TELEGRAM_BOT_TOKEN Updated
@@ -236,5 +237,27 @@ async function findTelegramGroup(symbol) {
 console.log('Bot is running...');
 
 // Graceful shutdown
-process.once('SIGINT', () => bot.stopPolling({ cancel: true }).then(() => console.log('Bot stopped by SIGINT')));
-process.once('SIGTERM', () => bot.stopPolling({ cancel: true }).then(() => console.log('Bot stopped by SIGTERM')));
+process.once('SIGINT', () => {
+    bot.stopPolling({ cancel: true }).then(() => {
+        console.log('Bot polling stopped by SIGINT');
+        if (server) server.close(() => console.log('HTTP server closed'));
+    });
+});
+process.once('SIGTERM', () => {
+    bot.stopPolling({ cancel: true }).then(() => {
+        console.log('Bot polling stopped by SIGTERM');
+        if (server) server.close(() => console.log('HTTP server closed'));
+    });
+});
+
+// Create a simple HTTP server to satisfy Render's port binding requirement
+const PORT = process.env.PORT || 3000; // Render provides the PORT environment variable
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Telegram Bot is active. Polling for updates.\n');
+});
+
+server.listen(PORT, () => {
+    console.log(`HTTP server listening on port ${PORT} for health checks.`);
+    console.log('Telegram Bot polling has been initiated.'); // Confirm bot polling starts after server
+});
